@@ -31,7 +31,7 @@ type FactoryWithContext func(context.Context) (*grpc.ClientConn, error)
 
 // Pool is the grpc client pool
 type Pool struct {
-	clients         chan ClientConn
+	clients         chan *ClientConn
 	factory         FactoryWithContext
 	idleTimeout     time.Duration
 	maxLifeDuration time.Duration
@@ -41,6 +41,7 @@ type Pool struct {
 // ClientConn is the wrapper for a grpc client conn
 type ClientConn struct {
 	*grpc.ClientConn
+	ccMutex       sync.Mutex
 	pool          *Pool
 	timeUsed      time.Time
 	timeInitiated time.Time
@@ -51,7 +52,8 @@ type ClientConn struct {
 // and the timeout for the idle clients. Returns an error if the initial
 // clients could not be created
 func New(factory Factory, init, capacity int, idleTimeout time.Duration,
-	maxLifeDuration ...time.Duration) (*Pool, error) {
+	maxLifeDuration ...time.Duration,
+) (*Pool, error) {
 	return NewWithContext(context.Background(), func(ctx context.Context) (*grpc.ClientConn, error) { return factory() },
 		init, capacity, idleTimeout, maxLifeDuration...)
 }
@@ -61,8 +63,8 @@ func New(factory Factory, init, capacity int, idleTimeout time.Duration,
 // be passed to the factory method during initialization. Returns an error if the
 // initial clients could not be created.
 func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capacity int, idleTimeout time.Duration,
-	maxLifeDuration ...time.Duration) (*Pool, error) {
-
+	maxLifeDuration ...time.Duration,
+) (*Pool, error) {
 	if capacity <= 0 {
 		capacity = 1
 	}
@@ -73,7 +75,7 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 		init = capacity
 	}
 	p := &Pool{
-		clients:     make(chan ClientConn, capacity),
+		clients:     make(chan *ClientConn, capacity),
 		factory:     factory,
 		idleTimeout: idleTimeout,
 	}
@@ -86,7 +88,7 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 			return nil, err
 		}
 
-		p.clients <- ClientConn{
+		p.clients <- &ClientConn{
 			ClientConn:    c,
 			pool:          p,
 			timeUsed:      time.Now(),
@@ -95,14 +97,14 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 	}
 	// Fill the rest of the pool with empty clients
 	for i := 0; i < capacity-init; i++ {
-		p.clients <- ClientConn{
+		p.clients <- &ClientConn{
 			pool: p,
 		}
 	}
 	return p, nil
 }
 
-func (p *Pool) getClients() chan ClientConn {
+func (p *Pool) getClients() chan *ClientConn {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -146,7 +148,7 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 		return nil, ErrClosed
 	}
 
-	wrapper := ClientConn{
+	wrapper := &ClientConn{
 		pool: p,
 	}
 	select {
@@ -164,30 +166,44 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 		wrapper.timeUsed.Add(idleTimeout).Before(time.Now()) {
 
 		wrapper.ClientConn.Close()
-		wrapper.ClientConn = nil
+		wrapper.dispose()
 	}
 
 	var err error
+	var conn *grpc.ClientConn
 	if wrapper.ClientConn == nil {
-		wrapper.ClientConn, err = p.factory(ctx)
+		conn, err = p.factory(ctx)
 		if err != nil {
 			// If there was an error, we want to put back a placeholder
 			// client in the channel
-			clients <- ClientConn{
+			clients <- &ClientConn{
 				pool: p,
 			}
 		}
+		wrapper.revive(conn)
 		// This is a new connection, reset its initiated time
 		wrapper.timeInitiated = time.Now()
 	}
 
-	return &wrapper, err
+	return wrapper, err
 }
 
 // Unhealthy marks the client conn as unhealthy, so that the connection
 // gets reset when closed
 func (c *ClientConn) Unhealthy() {
 	c.unhealthy = true
+}
+
+func (c *ClientConn) revive(conn *grpc.ClientConn) {
+	c.ccMutex.Lock()
+	defer c.ccMutex.Unlock()
+	c.ClientConn = conn
+}
+
+func (c *ClientConn) dispose() {
+	c.ccMutex.Lock()
+	defer c.ccMutex.Unlock()
+	c.ClientConn = nil
 }
 
 // Close returns a ClientConn to the pool. It is safe to call multiple time,
@@ -215,14 +231,14 @@ func (c *ClientConn) Close() error {
 
 	// We're cloning the wrapper so we can set ClientConn to nil in the one
 	// used by the user
-	wrapper := ClientConn{
+	wrapper := &ClientConn{
 		pool:       c.pool,
 		ClientConn: c.ClientConn,
 		timeUsed:   time.Now(),
 	}
 	if c.unhealthy {
 		wrapper.ClientConn.Close()
-		wrapper.ClientConn = nil
+		wrapper.dispose()
 	} else {
 		wrapper.timeInitiated = c.timeInitiated
 	}
@@ -233,7 +249,7 @@ func (c *ClientConn) Close() error {
 		return ErrFullPool
 	}
 
-	c.ClientConn = nil // Mark as closed
+	c.dispose()
 	return nil
 }
 
