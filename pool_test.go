@@ -171,7 +171,6 @@ func TestMaxLifeDuration(t *testing.T) {
 	if count > 1 {
 		t.Errorf("Dial function has been called multiple times")
 	}
-
 }
 
 func TestPoolClose(t *testing.T) {
@@ -212,13 +211,13 @@ func TestContextCancelation(t *testing.T) {
 		default:
 			return grpc.Dial("example.com", grpc.WithInsecure())
 		}
-
 	}, 1, 1, 0)
 
 	if err != context.Canceled {
 		t.Errorf("Returned error was not context.Canceled, but the context did cancel before the invocation")
 	}
 }
+
 func TestContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
@@ -232,7 +231,6 @@ func TestContextTimeout(t *testing.T) {
 		case <-time.After(time.Millisecond):
 			return grpc.Dial("example.com", grpc.WithInsecure())
 		}
-
 	}, 1, 1, 0)
 
 	if err != context.DeadlineExceeded {
@@ -244,7 +242,6 @@ func TestGetContextTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
 		return grpc.Dial("example.com", grpc.WithInsecure())
 	}, 1, 1, 0)
-
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
 	}
@@ -273,9 +270,7 @@ func TestGetContextFactoryTimeout(t *testing.T) {
 		case <-time.After(time.Millisecond):
 			return grpc.Dial("example.com", grpc.WithInsecure())
 		}
-
 	}, 1, 1, 0)
-
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
 	}
