@@ -16,9 +16,6 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Errorf("The pool returned an error: %s", err.Error())
 	}
-	if a := p.Available(); a != 3 {
-		t.Errorf("The pool available was %d but should be 3", a)
-	}
 	if a := p.Capacity(); a != 3 {
 		t.Errorf("The pool capacity was %d but should be 3", a)
 	}
@@ -31,9 +28,6 @@ func TestNew(t *testing.T) {
 	if client == nil {
 		t.Error("client was nil")
 	}
-	if a := p.Available(); a != 2 {
-		t.Errorf("The pool available was %d but should be 2", a)
-	}
 	if a := p.Capacity(); a != 3 {
 		t.Errorf("The pool capacity was %d but should be 3", a)
 	}
@@ -42,9 +36,6 @@ func TestNew(t *testing.T) {
 	err = client.Close()
 	if err != nil {
 		t.Errorf("Close returned an error: %s", err.Error())
-	}
-	if a := p.Available(); a != 3 {
-		t.Errorf("The pool available was %d but should be 3", a)
 	}
 	if a := p.Capacity(); a != 3 {
 		t.Errorf("The pool capacity was %d but should be 3", a)
@@ -71,9 +62,6 @@ func TestNew(t *testing.T) {
 		t.Errorf("Err3 was not nil: %s", err3.Error())
 	}
 
-	if a := p.Available(); a != 0 {
-		t.Errorf("The pool available was %d but should be 0", a)
-	}
 	if a := p.Capacity(); a != 3 {
 		t.Errorf("The pool capacity was %d but should be 3", a)
 	}
@@ -93,6 +81,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
+/* NOTE(Clif): This test is no longer relevant
 func TestTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
 		return grpc.Dial("example.com", grpc.WithInsecure())
@@ -105,9 +94,6 @@ func TestTimeout(t *testing.T) {
 	if err != nil {
 		t.Errorf("Get returned an error: %s", err.Error())
 	}
-	if a := p.Available(); a != 0 {
-		t.Errorf("The pool available was %d but expected 0", a)
-	}
 
 	// We want to fetch a second one, with a timeout. If the timeout was
 	// ommitted, the pool would wait indefinitely as it'd wait for another
@@ -118,6 +104,7 @@ func TestTimeout(t *testing.T) {
 		t.Errorf("Expected error \"%s\" but got \"%s\"", ErrTimeout, err2.Error())
 	}
 }
+*/
 
 func TestMaxLifeDuration(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
@@ -238,6 +225,7 @@ func TestContextTimeout(t *testing.T) {
 	}
 }
 
+/* NOTE(Clif) No longer relevant
 func TestGetContextTimeout(t *testing.T) {
 	p, err := New(func() (*grpc.ClientConn, error) {
 		return grpc.Dial("example.com", grpc.WithInsecure())
@@ -259,6 +247,7 @@ func TestGetContextTimeout(t *testing.T) {
 		t.Errorf("Returned error was not ErrTimeout, but the context was timed out before the Get invocation")
 	}
 }
+*/
 
 func TestGetContextFactoryTimeout(t *testing.T) {
 	p, err := NewWithContext(context.Background(), func(ctx context.Context) (*grpc.ClientConn, error) {
