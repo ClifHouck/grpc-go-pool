@@ -38,7 +38,6 @@ type Pool struct {
 	idleTimeout     time.Duration
 	maxLifeDuration time.Duration
 	mu              sync.RWMutex
-	getMutex        sync.Mutex
 }
 
 // ClientConn is the wrapper for a grpc client conn
@@ -106,6 +105,7 @@ func NewWithContext(ctx context.Context, factory FactoryWithContext, init, capac
 	for i := 0; i < capacity-init; i++ {
 		p.clients.Value = &ClientConn{
 			pool: p,
+			ring: p.clients,
 		}
 		p.clients = p.clients.Next()
 	}
@@ -145,9 +145,7 @@ func (p *Pool) IsClosed() bool {
 }
 
 // Get will return the next available client. If capacity
-// has not been reached, it will create a new one using the factory. Otherwise,
-// it will wait till the next client becomes available or a timeout.
-// A timeout of 0 is an indefinite wait
+// has not been reached, it will create a new one using the factory.
 func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -157,7 +155,10 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 		return nil, ErrClosed
 	}
 
+	// Every time Get() is called, we advance to the next client in the ring.
+	// This is essentially round-robin load-balancing. Keeping it simple for now.
 	p.clients = p.clients.Next()
+
 	client := p.clients.Value.(*ClientConn)
 
 	// Make a new client if there's not one here in the ring already.
@@ -211,11 +212,12 @@ func (p *Pool) Get(ctx context.Context) (*ClientConn, error) {
 }
 
 // Unhealthy marks the client conn as unhealthy, so that the connection
-// gets reset when closed
+// gets reset when closed.
 func (c *ClientConn) Unhealthy() {
 	c.unhealthy = true
 	// If this copy's grpc connection is unhealthy, so is the one held by
 	// the pool's ring.
+	// FIXME: Should we use a shared context instead?
 	c.pool.mu.Lock()
 	defer c.pool.mu.Unlock()
 	client := c.ring.Value.(*ClientConn)
@@ -236,8 +238,10 @@ func (c *ClientConn) dispose() {
 	c.ClientConn = nil
 }
 
-// Close returns a ClientConn to the pool. It is safe to call multiple time,
-// but will return an error after first time
+// Close 'returns' a ClientConn to the pool. It is safe to call multiple time,
+// but will return an error after first time. Note that grpc connections can
+// be safeuly utilized concurrently by many clients. Therefore there's no
+// real need to grant exclusive use of a connection to one client at a time.
 func (c *ClientConn) Close() error {
 	if c == nil {
 		return nil
@@ -260,6 +264,7 @@ func (c *ClientConn) Close() error {
 	}
 
 	c.dispose()
+
 	return nil
 }
 
